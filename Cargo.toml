@@ -1,0 +1,16 @@
+[package]
+name = "psql-serde"
+version = "0.1.0"
+authors = ["merl <merl@kribrum.ru>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+log = "0.4"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+postgres = { version = "0.17", features = ["with-chrono-0_4","with-serde_json-1","with-time-0_2"] }
+fallible-iterator = "0.2"
+chrono = { version = "0.4", features = ["serde"] }
+time = { version = "0.2", features = ["serde"] }
