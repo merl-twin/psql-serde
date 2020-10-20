@@ -3,7 +3,7 @@ use postgres::{
     RowIter,
     row::Row,
     error::Error as PsqlError,
-    types::{Type,FromSql,WasNull},
+    types::{Type,FromSql,WasNull,ToSql},
     Client, NoTls,
 };
 use serde::de::{
@@ -409,13 +409,47 @@ impl Psql {
         self.allow_itou = true;
         self
     }
-    pub fn query<'d,T: Deserialize<'d>>(&'d mut self, query: &str) -> ResultIterator<'d,T> {
+    pub fn query_str<'d,T: Deserialize<'d>>(&'d mut self, query: &str) -> ResultIterator<'d,T> {
         ResultIterator {
             allow_itou: self.allow_itou,
             iter: Some(self.client.query_raw(query, std::iter::empty()).map_err(Error::Select)),
             _t: PhantomData,
         }
     }
+    pub fn query<'s,'d, Q: PsqlDeserialize<'s,'d>>(&'d mut self, query: &'s Q) -> ResultIterator<'d,Q::Item> {
+        ResultIterator {
+            allow_itou: self.allow_itou,
+            iter: Some(self.client.query_raw(query.query(),query.params()).map_err(Error::Select)),
+            _t: PhantomData,
+        }
+    }
+}
+
+pub trait PsqlDeserializeAll<'d> {
+    type Item: Deserialize<'d>;
+    fn query(&self) -> &str;
+}
+
+impl<'s,'d,Q> PsqlDeserialize<'s,'d> for Q where Q: PsqlDeserializeAll<'d> {
+    type Item = <Q as PsqlDeserializeAll<'d>>::Item;
+    type Iter = std::iter::Empty<&'s dyn ToSql>;
+    type IntoIter = Self::Iter;
+
+    fn query(&self) -> &str {
+        PsqlDeserializeAll::query(self)
+    }
+    fn params(&self) -> Self::IntoIter {
+        std::iter::empty()
+    }
+}
+
+pub trait PsqlDeserialize<'s,'d>   {
+    type Item: Deserialize<'d>;
+    type Iter: Iterator<Item = &'s dyn ToSql> + ExactSizeIterator;
+    type IntoIter: IntoIterator<Item = &'s dyn ToSql, IntoIter = Self::Iter>;
+
+    fn query(&'s self) -> &'s str;
+    fn params(&'s self) -> Self::IntoIter;
 }
 
 pub struct CastOptions {
