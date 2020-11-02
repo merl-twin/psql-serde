@@ -17,7 +17,7 @@ use std::{
 
 pub use postgres::Statement;
 
-#[cfg(test)] mod tests;
+//#[cfg(test)] mod tests;
 
 #[derive(Debug)]
 pub enum Error {
