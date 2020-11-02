@@ -15,7 +15,9 @@ use std::{
     marker::PhantomData,
 };
 
-//#[cfg(test)] mod tests;
+pub use postgres::Statement;
+
+#[cfg(test)] mod tests;
 
 #[derive(Debug)]
 pub enum Error {
@@ -422,6 +424,9 @@ impl Psql {
             iter: Some(self.client.query_raw(query.query(),query.params()).map_err(Error::Select)),
             _t: PhantomData,
         }
+    }
+    pub fn client(&mut self) -> &mut Client {
+        &mut self.client
     }
 }
 
