@@ -7,7 +7,7 @@ use postgres::{
     Client, NoTls,
 };
 use serde::de::{
-    self,Visitor,Deserialize,DeserializeSeed,MapAccess,
+    self,Visitor,Deserialize,DeserializeSeed,MapAccess,SeqAccess,
     IntoDeserializer,
 };
 use std::{
@@ -27,12 +27,12 @@ pub enum Error {
     SelectNext(PsqlError),
     TryGet{ rust_type: &'static str, psql_type: String, psql_name: String, error: PsqlError },
     ForbiddenCast{ rust_type: &'static str, psql_type: String, psql_name: String },
+    UnknownSequenceType { psql_type: String, psql_name: String },
     Any,
     IgnoredAny,
     Char,
     Tuple,
     TupleStruct,
-    Seq,
     Identifier,
     Enum,
     NewtypeStruct,
@@ -246,6 +246,10 @@ impl<'de, 'a, 'b> de::Deserializer<'de> for &'a mut Deserializer<'b> {
         }
     }
 
+    fn deserialize_seq<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
+        visitor.visit_seq(SeqDeserializer::new(self.row,self.index)?)
+    }
+
     fn deserialize_map<V: Visitor<'de>>(self, visitor: V) -> Result<V::Value, Self::Error> {
         visitor.visit_map(self)
     }
@@ -257,7 +261,6 @@ impl<'de, 'a, 'b> de::Deserializer<'de> for &'a mut Deserializer<'b> {
     fn deserialize_unit<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Self::Error> { Err(Error::Unit) }
     fn deserialize_unit_struct<V: Visitor<'de>>(self, _name: &'static str, _visitor: V) -> Result<V::Value, Self::Error> { Err(Error::UnitStruct) }
     fn deserialize_newtype_struct<V: Visitor<'de>>(self, _name: &'static str, _visitor: V) -> Result<V::Value, Self::Error> { Err(Error::NewtypeStruct) }
-    fn deserialize_seq<V: Visitor<'de>>(self, _visitor: V) -> Result<V::Value, Self::Error> { Err(Error::Seq) }
     fn deserialize_tuple<V: Visitor<'de>>(self, _len: usize, _visitor: V) -> Result<V::Value, Self::Error> { Err(Error::Tuple) }
     fn deserialize_tuple_struct<V: Visitor<'de>>(self, _name: &'static str, _len: usize, _visitor: V) -> Result<V::Value, Self::Error> { Err(Error::TupleStruct) }   
     fn deserialize_enum<V: Visitor<'de>>(self, _name: &'static str, _variants: &'static [&'static str], _visitor: V) -> Result<V::Value, Self::Error> { Err(Error::Enum) }
@@ -343,6 +346,63 @@ impl Timestamp {
             Timestamp::ChronoNaive => serde_json::to_value(&get_value::<chrono::NaiveDateTime>(row,index)?),
             Timestamp::TimePrimitive => serde_json::to_value(&get_value::<time::PrimitiveDateTime>(row,index)?),
         }.map_err(Error::Json)
+    }
+}
+
+
+enum SeqDeserializer {
+    None,
+    Int8(std::vec::IntoIter<i64>),
+    Text(std::vec::IntoIter<String>),
+}
+impl SeqDeserializer {
+    fn new(row: &Row, index: usize) -> Result<SeqDeserializer,Error> {
+        /*println!("DEBUG: {}: {}",
+                 row.columns()[index].name(),
+                 row.columns()[index].type_().name());*/
+        Ok(match row.columns()[index].type_() {
+            &Type::INT8_ARRAY => SeqDeserializer::Int8({
+                row.try_get::<_,Vec<i64>>(index)
+                    .map_err(|e| Error::TryGet{ rust_type: std::any::type_name::<Vec<i64>>(),
+                                                psql_type: row.columns()[index].type_().name().to_string(),
+                                                psql_name: row.columns()[index].name().to_string(),
+                                                error: e })?.into_iter()
+            }),
+            &Type::TEXT_ARRAY => SeqDeserializer::Text({
+                row.try_get::<_,Vec<String>>(index)
+                    .map_err(|e| Error::TryGet{ rust_type: std::any::type_name::<Vec<String>>(),
+                                                psql_type: row.columns()[index].type_().name().to_string(),
+                                                psql_name: row.columns()[index].name().to_string(),
+                                                error: e })?.into_iter()
+            }),
+            _ => return Err(Error::UnknownSequenceType {
+                psql_type: row.columns()[index].type_().name().to_string(),
+                psql_name: row.columns()[index].name().to_string(),
+            }),
+        })
+    }
+}
+impl<'t> SeqAccess<'t> for SeqDeserializer {
+    type Error = Error;
+    
+    fn next_element_seed<K>(&mut self, seed: K) -> Result<Option<K::Value>, Self::Error>
+    where K: DeserializeSeed<'t>
+    {
+        /*println!("DEBUG: {}: {} => {}",
+                 self.row.columns()[self.index].name(),
+                 self.row.columns()[self.index].type_().name(),
+                 std::any::type_name::<K::Value>());*/
+        match self {
+            SeqDeserializer::None => Ok(None),
+            SeqDeserializer::Int8(iter) => match iter.next() {
+                None => Ok(None),
+                Some(nxt) => seed.deserialize(nxt.into_deserializer()).map(|v|Some(v)),
+            },
+            SeqDeserializer::Text(iter) => match iter.next() {
+                None => Ok(None),
+                Some(nxt) => seed.deserialize(nxt.into_deserializer()).map(|v|Some(v)),
+            },
+        }
     }
 }
 
