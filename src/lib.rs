@@ -15,7 +15,7 @@ use std::{
     marker::PhantomData,
 };
 
-pub use postgres::Statement;
+pub use postgres::{self,Statement};
 
 //#[cfg(test)] mod tests;
 

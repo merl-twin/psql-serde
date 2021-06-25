@@ -1,6 +1,6 @@
 [package]
 name = "psql-serde"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["merl <merl@kribrum.ru>"]
 edition = "2018"
 
